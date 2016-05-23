@@ -4,21 +4,15 @@
 package whisper
 
 import (
-	"bufio"
+	"encoding/json"
 	"fmt"
+	"net"
 	"os"
-	"strings"
 	"time"
 )
 
 // Version specifies the current revision of the whisper library
 const Version = "1.0"
-
-// Strings to specify exit queries on input.
-const (
-	EXIT = "exit"
-	QUIT = "quit"
-)
 
 // Message represents data sent as JSON across the whispernet
 type Message struct {
@@ -27,67 +21,73 @@ type Message struct {
 	Timestamp time.Time `json:"timestamp"` // The time that the message was sent
 }
 
-// NewMessage constructs a message object for JSON serialization
-func NewMessage(body string, sender string) *Message {
-	return &Message{
-		Sender:    sender,
+// Client is a whisper agent that accepts user input and sends messages.
+type Client struct {
+	Name  string        // The user name of the client
+	Input *InputHandler // The handler for user input from the console
+	Conn  net.Conn      // Connection to send the data to.
+	// Conns []*net.Conn   // Connections handled by the client
+
+}
+
+// NewClient constructs a client and instantiates handlers.
+func NewClient(name string) *Client {
+	return &Client{
+		Name:  name,
+		Input: NewInputHandler(">"),
+	}
+}
+
+// Connect to the given server address
+func (client *Client) Connect(address string) *Error {
+	conn, err := net.Dial("tcp", address)
+	if err != nil {
+		return &Error{fmt.Sprintf("Could not connect to %s: %s", address, err.Error()), 99}
+	}
+
+	// client.Conns = append(client.Conns, &conn)
+	client.Conn = conn
+	return nil
+}
+
+// Close the connection(s) that are maintained by the client
+func (client *Client) Close() *Error {
+	err := client.Conn.Close()
+	if err != nil {
+		return &Error{fmt.Sprintf("Could not close connection: %s", err.Error()), 98}
+	}
+	return nil
+}
+
+// Run the handler and sends any messages from the command line.
+func (client *Client) Run() *Error {
+	for {
+		body, err := client.Input.ReadLine()
+		if err != nil {
+			return err
+		}
+
+		// Send the message to the server.
+		err = client.Send(body)
+		if err != nil {
+			return err
+		}
+	}
+}
+
+// Send constructs a message object for JSON serialization and puts it on the
+// TCP connection object that the client maintains as open with the server.
+func (client *Client) Send(body string) *Error {
+	msg := &Message{
+		Sender:    client.Name,
 		Body:      body,
 		Timestamp: time.Now(),
 	}
-}
 
-// InputHandler provides a method for reading information from standard input
-// with a prompt and dealing with it downstream by calling next on the buffer.
-type InputHandler struct {
-	prompt string         // The prompt symbol to use
-	reader *bufio.Scanner // The scanner to read standard input from
-	exit   map[string]int // Exit codes and queries
-}
-
-// NewInputHandler creates an input handler connected to standard input.
-func NewInputHandler(prompt string) *InputHandler {
-	exit := make(map[string]int)
-	exit[EXIT] = 1
-	exit[QUIT] = 2
-
-	return &InputHandler{
-		prompt: prompt,
-		reader: bufio.NewScanner(os.Stdin),
-		exit:   exit,
-	}
-}
-
-// ReadLine returns the next line from the buffered reading of stdin.
-func (handler *InputHandler) ReadLine() (string, *Error) {
-	fmt.Print(handler.prompt + " ")
-
-	if handler.reader.Scan() {
-		// Read text and strip stpaces
-		output := handler.reader.Text()
-		output = strings.TrimSpace(output)
-
-		if _, contains := handler.exit[strings.ToLower(output)]; contains {
-			// The user has typed in an exit code.
-			return "", &Error{"The user has exited the program", 0}
-		}
-
-		return output, nil
+	enc := json.NewEncoder(os.Stdout)
+	if err := enc.Encode(msg); err != nil {
+		return &Error{fmt.Sprintf("Could not encode message: %s", err.Error()), 3}
 	}
 
-	return "", &Error{"Could not read the next line from standard input.", 1}
-}
-
-// Error specifies the whisper specific error type that can be tested against
-type Error struct {
-	text string // The message of the error
-	code int    // The code of the error
-}
-
-func (err *Error) Error() string {
-	return err.text
-}
-
-// Code returns the error code of the message to exit the program.
-func (err *Error) Code() int {
-	return err.code
+	return nil
 }

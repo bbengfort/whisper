@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -34,6 +33,11 @@ func main() {
 			Usage:  "identify yourself on the whispernet",
 			EnvVar: "WHISPER_NAME",
 		},
+		cli.StringFlag{
+			Name:  "address, A",
+			Value: "localhost:3264",
+			Usage: "specify a whisper server to connect to",
+		},
 	}
 
 	// Run the command line application
@@ -46,23 +50,20 @@ func beginWhispering(ctx *cli.Context) error {
 	// Run the interrupt handler
 	handleInterrupt()
 
-	// Collect the name from the command line input
-	name := ctx.String("name")
+	// Create the Client
+	client := whisper.NewClient(ctx.String("name"))
 
-	reader := whisper.NewInputHandler(">")
-	for {
-		body, err := reader.ReadLine()
-		if err != nil {
-			return cli.NewExitError(err.Error(), err.Code())
-		}
-
-		// Construct the message to write as output.
-		msg := whisper.NewMessage(body, name)
-		enc := json.NewEncoder(os.Stdout)
-		if err := enc.Encode(msg); err != nil {
-			return cli.NewExitError(err.Error(), 3)
-		}
+	// Connect to the Server and run the application
+	err := client.Connect(ctx.String("address"))
+	if err != nil {
+		return cli.NewExitError(err.Error(), err.Code())
 	}
+
+	err = client.Run()
+	client.Close()
+
+	// Return the exit error value
+	return cli.NewExitError(err.Error(), err.Code())
 }
 
 // Gets the default name from the environment
