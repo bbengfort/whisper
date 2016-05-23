@@ -34,6 +34,26 @@ func NewInputHandler(prompt string) *InputHandler {
 	}
 }
 
+// Handle user input by sending messages when they're input on the command line.
+func (client *Client) Handle(echan chan<- *Error) {
+	for {
+		body, err := client.Input.ReadLine()
+		if err != nil {
+			echan <- err
+			close(echan)
+			return
+		}
+
+		// Send the message to the server.
+		err = client.Send(body)
+		if err != nil {
+			echan <- err
+			close(echan)
+			return
+		}
+	}
+}
+
 // ReadLine returns the next line from the buffered reading of stdin.
 func (handler *InputHandler) ReadLine() (string, *Error) {
 	fmt.Print(handler.prompt + " ")

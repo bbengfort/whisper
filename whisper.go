@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"time"
 )
 
@@ -20,28 +21,35 @@ type Message struct {
 	Timestamp time.Time `json:"timestamp"` // The time that the message was sent
 }
 
+// Print a message to a representative string.
+func (msg Message) Print() string {
+	return fmt.Sprintf("[%s] %s: %s", msg.Timestamp.Format(time.Stamp), msg.Sender, msg.Body)
+}
+
 // Client is a whisper agent that accepts user input and sends messages.
 type Client struct {
 	Name    string        // The user name of the client
 	Input   *InputHandler // The handler for user input from the console
-	Address string        // Address of the node to send the data to.
+	Address string        // Address to listen on for messages.
+	Server  string        // Address of the server to send data to
 
 }
 
 // NewClient constructs a client and instantiates handlers.
-func NewClient(name string, address string) *Client {
+func NewClient(name string, address string, server string) *Client {
 	return &Client{
 		Name:    name,
 		Input:   NewInputHandler(">"),
 		Address: address,
+		Server:  server,
 	}
 }
 
 // Connect to the given server address
 func (client *Client) Connect() (net.Conn, *Error) {
-	conn, err := net.Dial("tcp", client.Address)
+	conn, err := net.Dial("tcp", client.Server)
 	if err != nil {
-		return nil, &Error{fmt.Sprintf("Could not connect to %s: %s", client.Address, err.Error()), 99}
+		return nil, &Error{fmt.Sprintf("Could not connect to %s: %s", client.Server, err.Error()), 99}
 	}
 
 	return conn, nil
@@ -49,17 +57,39 @@ func (client *Client) Connect() (net.Conn, *Error) {
 
 // Run the handler and sends any messages from the command line.
 func (client *Client) Run() *Error {
+
+	err := make(chan *Error)
+
+	// Run the listener handler
+	go client.Listen(err)
+
+	// Now handle all user input
+	go client.Handle(err)
+
+	return <-err
+}
+
+// Listen accepts incomming connections and prints messages to the console.
+func (client *Client) Listen(echan chan<- *Error) {
+
+	listen, err := net.Listen("tcp", client.Address)
+	if err != nil {
+		echan <- &Error{fmt.Sprintf("Couldn't listen on %s: %s", client.Address, err.Error()), 99}
+		close(echan)
+		return
+	}
+
+	defer listen.Close()
+
 	for {
-		body, err := client.Input.ReadLine()
+		conn, err := listen.Accept()
 		if err != nil {
-			return err
+			echan <- &Error{fmt.Sprintf("Couldn't accept connection: %s", err.Error()), 98}
+			close(echan)
+			return
 		}
 
-		// Send the message to the server.
-		err = client.Send(body)
-		if err != nil {
-			return err
-		}
+		go client.Recv(conn)
 	}
 }
 
@@ -84,5 +114,21 @@ func (client *Client) Send(body string) *Error {
 		return &Error{fmt.Sprintf("Could not encode message: %s", err.Error()), 3}
 	}
 
+	fmt.Fprintf(os.Stdout, "\r\r> %s\n", msg.Print())
+
+	return nil
+}
+
+// Recv deserializes JSON messages from the stream and prints them out.
+func (client *Client) Recv(conn net.Conn) *Error {
+	defer conn.Close()
+
+	dec := json.NewDecoder(conn)
+	var m Message
+	if err := dec.Decode(&m); err != nil {
+		return &Error{fmt.Sprintf("Could not decode message: %s", err.Error()), 4}
+	}
+
+	fmt.Fprintf(os.Stdout, "\r> %s\n> ", m.Print())
 	return nil
 }

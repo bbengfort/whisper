@@ -36,6 +36,11 @@ func main() {
 		cli.StringFlag{
 			Name:  "address, A",
 			Value: "localhost:3264",
+			Usage: "specify the address to listen on",
+		},
+		cli.StringFlag{
+			Name:  "server, S",
+			Value: "localhost:3265",
 			Usage: "specify a whisper server to connect to",
 		},
 	}
@@ -51,7 +56,7 @@ func beginWhispering(ctx *cli.Context) error {
 	handleInterrupt()
 
 	// Create the Client
-	client := whisper.NewClient(ctx.String("name"), ctx.String("address"))
+	client := whisper.NewClient(ctx.String("name"), ctx.String("address"), ctx.String("server"))
 
 	// Connect to the Server and run the application
 	err := client.Run()
