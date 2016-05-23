@@ -51,18 +51,10 @@ func beginWhispering(ctx *cli.Context) error {
 	handleInterrupt()
 
 	// Create the Client
-	client := whisper.NewClient(ctx.String("name"))
+	client := whisper.NewClient(ctx.String("name"), ctx.String("address"))
 
 	// Connect to the Server and run the application
-	err := client.Connect(ctx.String("address"))
-	if err != nil {
-		return cli.NewExitError(err.Error(), err.Code())
-	}
-
-	err = client.Run()
-	client.Close()
-
-	// Return the exit error value
+	err := client.Run()
 	return cli.NewExitError(err.Error(), err.Code())
 }
 

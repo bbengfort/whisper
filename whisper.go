@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"os"
 	"time"
 )
 
@@ -23,40 +22,29 @@ type Message struct {
 
 // Client is a whisper agent that accepts user input and sends messages.
 type Client struct {
-	Name  string        // The user name of the client
-	Input *InputHandler // The handler for user input from the console
-	Conn  net.Conn      // Connection to send the data to.
-	// Conns []*net.Conn   // Connections handled by the client
+	Name    string        // The user name of the client
+	Input   *InputHandler // The handler for user input from the console
+	Address string        // Address of the node to send the data to.
 
 }
 
 // NewClient constructs a client and instantiates handlers.
-func NewClient(name string) *Client {
+func NewClient(name string, address string) *Client {
 	return &Client{
-		Name:  name,
-		Input: NewInputHandler(">"),
+		Name:    name,
+		Input:   NewInputHandler(">"),
+		Address: address,
 	}
 }
 
 // Connect to the given server address
-func (client *Client) Connect(address string) *Error {
-	conn, err := net.Dial("tcp", address)
+func (client *Client) Connect() (net.Conn, *Error) {
+	conn, err := net.Dial("tcp", client.Address)
 	if err != nil {
-		return &Error{fmt.Sprintf("Could not connect to %s: %s", address, err.Error()), 99}
+		return nil, &Error{fmt.Sprintf("Could not connect to %s: %s", client.Address, err.Error()), 99}
 	}
 
-	// client.Conns = append(client.Conns, &conn)
-	client.Conn = conn
-	return nil
-}
-
-// Close the connection(s) that are maintained by the client
-func (client *Client) Close() *Error {
-	err := client.Conn.Close()
-	if err != nil {
-		return &Error{fmt.Sprintf("Could not close connection: %s", err.Error()), 98}
-	}
-	return nil
+	return conn, nil
 }
 
 // Run the handler and sends any messages from the command line.
@@ -78,13 +66,20 @@ func (client *Client) Run() *Error {
 // Send constructs a message object for JSON serialization and puts it on the
 // TCP connection object that the client maintains as open with the server.
 func (client *Client) Send(body string) *Error {
+
 	msg := &Message{
 		Sender:    client.Name,
 		Body:      body,
 		Timestamp: time.Now(),
 	}
 
-	enc := json.NewEncoder(os.Stdout)
+	conn, err := client.Connect()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	enc := json.NewEncoder(conn)
 	if err := enc.Encode(msg); err != nil {
 		return &Error{fmt.Sprintf("Could not encode message: %s", err.Error()), 3}
 	}
