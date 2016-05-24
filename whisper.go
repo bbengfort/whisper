@@ -16,14 +16,15 @@ const Version = "1.0"
 
 // Message represents data sent as JSON across the whispernet
 type Message struct {
-	Sender    string    `json:"sender"`    // The name of the message sender
-	Body      string    `json:"body"`      // The body of the message
-	Timestamp time.Time `json:"timestamp"` // The time that the message was sent
+	Sender string    `json:"sender"` // The name of the message sender
+	Addr   string    `json:"addr"`   // The address of the sender
+	Body   string    `json:"body"`   // The body of the message
+	SentAt time.Time `json:"sent"`   // The time that the message was sent
 }
 
 // Print a message to a representative string.
-func (msg Message) Print() string {
-	return fmt.Sprintf("[%s] %s: %s", msg.Timestamp.Format(time.Stamp), msg.Sender, msg.Body)
+func (msg Message) String() string {
+	return fmt.Sprintf("[%s] %s: %s", msg.SentAt.Format(time.Stamp), msg.Sender, msg.Body)
 }
 
 // Client is a whisper agent that accepts user input and sends messages.
@@ -36,12 +37,11 @@ type Client struct {
 }
 
 // NewClient constructs a client and instantiates handlers.
-func NewClient(name string, address string, server string) *Client {
+func NewClient(name string, server string) *Client {
 	return &Client{
-		Name:    name,
-		Input:   NewInputHandler(">"),
-		Address: address,
-		Server:  server,
+		Name:   name,
+		Input:  NewInputHandler(">"),
+		Server: server,
 	}
 }
 
@@ -71,15 +71,25 @@ func (client *Client) Run() *Error {
 
 // Listen accepts incomming connections and prints messages to the console.
 func (client *Client) Listen(echan chan<- *Error) {
+	addr, iperr := ExternalIP()
+	if iperr != nil {
+		echan <- iperr
+		close(echan)
+		return
+	}
 
-	listen, err := net.Listen("tcp", client.Address)
+	listen, err := net.Listen("tcp4", addr+":0")
 	if err != nil {
-		echan <- &Error{fmt.Sprintf("Couldn't listen on %s: %s", client.Address, err.Error()), 99}
+		echan <- &Error{fmt.Sprintf("Couldn't listen on %s:0 -- %s", addr, err.Error()), 99}
 		close(echan)
 		return
 	}
 
 	defer listen.Close()
+	client.Address = listen.Addr().String()
+
+	// Mention what is going on, on which address.
+	fmt.Printf("Listening on %s, quit by typing exit\n> ", client.Address)
 
 	for {
 		conn, err := listen.Accept()
@@ -98,9 +108,10 @@ func (client *Client) Listen(echan chan<- *Error) {
 func (client *Client) Send(body string) *Error {
 
 	msg := &Message{
-		Sender:    client.Name,
-		Body:      body,
-		Timestamp: time.Now(),
+		Sender: client.Name,
+		Addr:   client.Address,
+		Body:   body,
+		SentAt: time.Now(),
 	}
 
 	conn, err := client.Connect()
@@ -114,7 +125,7 @@ func (client *Client) Send(body string) *Error {
 		return &Error{fmt.Sprintf("Could not encode message: %s", err.Error()), 3}
 	}
 
-	fmt.Fprintf(os.Stdout, "\r\r> %s\n", msg.Print())
+	fmt.Fprintf(os.Stdout, "\r\r> %s\n", msg.String())
 
 	return nil
 }
@@ -129,6 +140,7 @@ func (client *Client) Recv(conn net.Conn) *Error {
 		return &Error{fmt.Sprintf("Could not decode message: %s", err.Error()), 4}
 	}
 
-	fmt.Fprintf(os.Stdout, "\r> %s\n> ", m.Print())
+	fmt.Fprintf(os.Stdout, "> Message from %s", m.Addr)
+	fmt.Fprintf(os.Stdout, "\r> %s\n> ", m.String())
 	return nil
 }
